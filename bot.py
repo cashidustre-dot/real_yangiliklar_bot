@@ -1,245 +1,216 @@
 import os
 import asyncio
-import base64
+import logging
 import tempfile
-from openai import OpenAI
+
 from telegram import Bot
+from telegram.error import TelegramError
 
-# =========================
-# SOZLAMALAR
-# =========================
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not TELEGRAM_TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN topilmadi!")
-
-if not CHAT_ID:
-    raise RuntimeError("TELEGRAM_CHAT_ID topilmadi!")
-
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY topilmadi!")
-
-telegram_bot = Bot(token=TELEGRAM_TOKEN)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+from ai_content import (
+    get_current_category,
+    create_ad_text,
+    create_flyer,
+)
 
 
-# =========================
-# RESTAURANT MA'LUMOTLARI
-# =========================
+# ============================================================
+# LOG
+# ============================================================
 
-RESTAURANT_NAME = "REAL RESTAURANT"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 
-ADDRESS = "M39 yo‘li, 991-km"
-
-PHONE_1 = "+998 91 564 40 00"
-PHONE_2 = "+998 97 124 01 10"
-
-
-# Har safar boshqa mavzu
-TOPICS = [
-    "katta Jizzax somsasi",
-    "milliy osh",
-    "mazali milliy taomlar",
-    "oilaviy dam olish",
-    "M39 yo‘lida qulay restoran",
-    "issiq va yangi tayyorlangan taomlar",
-    "choy va suhbat",
-    "REAL RESTAURANT xizmatlari",
-]
+logger = logging.getLogger(__name__)
 
 
-topic_index = 0
+# ============================================================
+# TELEGRAM SOZLAMALARI
+# ============================================================
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Railway Variables ichida TELEGRAM_CHAT_ID bo'lsa shuni ishlatadi.
+#
+# Agar o'zgaruvchi bo'lmasa:
+# @realqulaylikm39 ishlatiladi.
+#
+# Guruh uchun odatda -100xxxxxxxxxx ko'rinishidagi ID kerak bo'ladi.
+#
+TELEGRAM_CHAT_ID = os.getenv(
+    "TELEGRAM_CHAT_ID",
+    "@realqulaylikm39",
+)
 
 
-# =========================
-# AI REKLAMA MATNI
-# =========================
+# ============================================================
+# TEKSHIRUV
+# ============================================================
 
-def create_ad_text(topic):
-
-    prompt = f"""
-Sen REAL RESTAURANT uchun professional reklama yozuvchisisan.
-
-Restoran:
-{RESTAURANT_NAME}
-
-Manzil:
-{ADDRESS}
-
-Telefon:
-{PHONE_1}
-{PHONE_2}
-
-Bugungi reklama mavzusi:
-{topic}
-
-MUHIM:
-REAL RESTAURANT katta Jizzax somsasi bilan mashhur.
-Jizzax somsasi katta, dumaloq, to‘yimli va ishtaha ochadigan
-taom sifatida tasvirlansin.
-
-Qisqa, chiroyli va odamni restoranga tashrif buyurishga
-qiziqtiradigan Telegram reklama yoz.
-
-Reklamada quyidagilar bo‘lsin:
-🍽️ restoran nomi
-🔥 asosiy reklama
-📍 manzil
-📞 telefonlar
-
-Haqiqatga mos bo‘lmagan chegirma yoki aksiya o‘ylab topma.
-
-Faqat reklama matnini qaytar.
-"""
-
-    response = openai_client.responses.create(
-        model="gpt-5.6-luna",
-        input=prompt
+if not TELEGRAM_BOT_TOKEN:
+    raise RuntimeError(
+        "TELEGRAM_BOT_TOKEN topilmadi! "
+        "Railway → Variables bo'limiga tokenni kiriting."
     )
 
-    return response.output_text.strip()
 
+# ============================================================
+# ASOSIY VAZIFA
+# ============================================================
 
-# =========================
-# AI FLYER YARATISH
-# =========================
+async def send_restaurant_ad():
+    """
+    Railway Cron bir marta ishga tushirganda:
 
-def create_flyer(topic):
+    1. Kategoriya tanlanadi
+    2. AI reklama matnini yaratadi
+    3. AI flyer yaratadi
+    4. Telegramga yuboradi
+    5. Jarayon tugaydi
 
-    prompt = f"""
-Create a professional Uzbek restaurant advertising flyer.
+    Keyingi ishga tushirishni Railway Cron amalga oshiradi.
+    """
 
-Restaurant:
-REAL RESTAURANT
+    logger.info("=" * 60)
+    logger.info("REAL RESTAURANT AI BOT ISHLADI")
+    logger.info("=" * 60)
 
-Location:
-M39 yo‘li, 991-km
+    # --------------------------------------------------------
+    # 1. BUGUNGI KATEGORIYA
+    # --------------------------------------------------------
 
-Phone:
-+998 91 564 40 00
-+998 97 124 01 10
+    category = get_current_category()
 
-Main advertising topic:
-{topic}
+    category_name = category["name"]
 
-IMPORTANT:
-REAL RESTAURANT serves authentic large Jizzakh somsa.
-The Jizzakh somsa should be LARGE, ROUND, golden-brown,
-thick and very appetizing.
-
-Create a premium modern restaurant advertisement.
-Use a realistic food-photography style.
-Make the food look fresh, hot and delicious.
-
-The flyer should be suitable for Telegram.
-Use an attractive composition and different visual style
-from previous advertisements.
-
-Do not invent discounts or prices.
-Do not add fake information.
-
-Include:
-REAL RESTAURANT
-M39 yo‘li, 991-km
-+998 91 564 40 00
-+998 97 124 01 10
-"""
-
-    result = openai_client.images.generate(
-        model="gpt-image-2",
-        prompt=prompt,
-        size="1024x1024"
+    logger.info(
+        "Bugungi reklama kategoriyasi: %s",
+        category_name,
     )
 
-    image_base64 = result.data[0].b64_json
+    # --------------------------------------------------------
+    # 2. AI REKLAMA MATNI
+    # --------------------------------------------------------
 
-    image_bytes = base64.b64decode(image_base64)
-
-    temp_file = tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix=".png"
+    logger.info(
+        "AI reklama matnini tayyorlamoqda..."
     )
 
-    temp_file.write(image_bytes)
-    temp_file.close()
+    ad_text = create_ad_text(category)
 
-    return temp_file.name
+    logger.info(
+        "Reklama matni tayyor."
+    )
 
+    # --------------------------------------------------------
+    # 3. AI FLYER
+    # --------------------------------------------------------
 
-# =========================
-# TELEGRAMGA YUBORISH
-# =========================
+    logger.info(
+        "AI flyer tayyorlamoqda..."
+    )
 
-async def send_advertisement():
-
-    global topic_index
-
-    topic = TOPICS[topic_index]
-
-    print(f"🤖 AI reklama tayyorlamoqda: {topic}")
-
-    # AI matn
-    ad_text = create_ad_text(topic)
-
-    print("📝 Reklama matni tayyor.")
-
-    # AI flyer
-    flyer_path = create_flyer(topic)
-
-    print("🖼️ Flyer tayyor.")
+    flyer_path = None
 
     try:
 
-        # Avval flyer
-        with open(flyer_path, "rb") as photo:
+        flyer_path = create_flyer(category)
 
-            await telegram_bot.send_photo(
-                chat_id=CHAT_ID,
-                photo=photo,
-                caption=ad_text
+        logger.info(
+            "Flyer tayyor: %s",
+            flyer_path,
+        )
+
+        # ----------------------------------------------------
+        # 4. TELEGRAM
+        # ----------------------------------------------------
+
+        logger.info(
+            "Telegramga yuborilmoqda..."
+        )
+
+        async with Bot(
+            token=TELEGRAM_BOT_TOKEN
+        ) as bot:
+
+            # Telegram caption maksimal uzunligi sababli
+            # juda uzun matn bo'lsa qisqartiramiz.
+            caption = ad_text[:1000]
+
+            await bot.send_photo(
+                chat_id=TELEGRAM_CHAT_ID,
+                photo=open(
+                    flyer_path,
+                    "rb",
+                ),
+                caption=caption,
             )
 
-        print("✅ Flyer va reklama Telegramga yuborildi!")
+        logger.info(
+            "✅ Flyer va reklama Telegramga yuborildi!"
+        )
+
+    except TelegramError as error:
+
+        logger.error(
+            "❌ Telegram xatosi: %s",
+            error,
+        )
+
+        raise
+
+    except Exception as error:
+
+        logger.exception(
+            "❌ Reklama yuborishda xato: %s",
+            error,
+        )
+
+        raise
 
     finally:
 
-        # Vaqtinchalik rasmni o‘chirish
-        try:
-            os.remove(flyer_path)
-        except:
-            pass
+        # ----------------------------------------------------
+        # VAQTINCHALIK FAYLNI O'CHIRISH
+        # ----------------------------------------------------
 
-    # Keyingi safar boshqa mavzu
-    topic_index = (topic_index + 1) % len(TOPICS)
+        if flyer_path:
+
+            try:
+
+                if os.path.exists(flyer_path):
+                    os.remove(flyer_path)
+
+                    logger.info(
+                        "Vaqtinchalik flyer fayli o'chirildi."
+                    )
+
+            except Exception as error:
+
+                logger.warning(
+                    "Flyer faylini o'chirib bo'lmadi: %s",
+                    error,
+                )
+
+    logger.info("=" * 60)
+    logger.info(
+        "REAL RESTAURANT AI BOT ISHI YAKUNLANDI"
+    )
+    logger.info("=" * 60)
 
 
-# =========================
-# ASOSIY ISH
-# =========================
+# ============================================================
+# START
+# ============================================================
 
-async def main():
+def main():
 
-    print("🚀 REAL RESTAURANT AI BOT ISHLADI!")
-
-    while True:
-
-        try:
-
-            await send_advertisement()
-
-        except Exception as error:
-
-            print("❌ XATOLIK:")
-            print(error)
-
-        print("⏰ Keyingi reklama 2 soatdan keyin.")
-
-        # 2 SOAT
-        await asyncio.sleep(2 * 60 * 60)
+    asyncio.run(
+        send_restaurant_ad()
+    )
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+
+    main()
