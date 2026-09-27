@@ -16,17 +16,16 @@ async def send_news():
     bot = Bot(token=TOKEN)
 
     message = """
-🍽️ REAL RESTAURANT
+🤖 REAL RESTAURANT — TEST
 
 Assalomu alaykum! 👋
 
-Siz uchun yangi xabarlar, mazali taomlar va maxsus takliflarni muntazam ulashib boramiz.
+Bu avtomatik test xabari.
+
+⏰ Bot har 2 daqiqada xabar yuborishni tekshiryapti.
 
 📍 M39 yo‘li, 991-km
-📞 +998 91 564 40 00
-📞 +998 97 124 01 10
-
-✨ REAL RESTAURANT — mazali taom va sifatli xizmat!
+🍽️ REAL RESTAURANT
 """
 
     await bot.send_message(
@@ -34,7 +33,7 @@ Siz uchun yangi xabarlar, mazali taomlar va maxsus takliflarni muntazam ulashib 
         text=message
     )
 
-    print("Xabar yuborildi!")
+    print("✅ Xabar yuborildi!")
 
 
 async def main():
@@ -42,10 +41,10 @@ async def main():
         try:
             await send_news()
         except Exception as e:
-            print("Xatolik:", e)
+            print("❌ Xatolik:", e)
 
-        # 2 soat kutish
-        await asyncio.sleep(2 * 60 * 60)
+        # TEST: 2 daqiqa kutadi
+        await asyncio.sleep(2 * 60)
 
 
 if __name__ == "__main__":
