@@ -1,17 +1,11 @@
+
 import os
 import asyncio
 import logging
-import tempfile
+from pathlib import Path
 
 from telegram import Bot
 from telegram.error import TelegramError
-
-from ai_content import (
-    get_current_category,
-    create_ad_text,
-    create_flyer,
-)
-
 
 # ============================================================
 # LOG
@@ -24,25 +18,27 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
 # ============================================================
 # TELEGRAM SOZLAMALARI
 # ============================================================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-# Railway Variables ichida TELEGRAM_CHAT_ID bo'lsa shuni ishlatadi.
-#
-# Agar o'zgaruvchi bo'lmasa:
-# @realqulaylikm39 ishlatiladi.
-#
-# Guruh uchun odatda -100xxxxxxxxxx ko'rinishidagi ID kerak bo'ladi.
-#
 TELEGRAM_CHAT_ID = os.getenv(
     "TELEGRAM_CHAT_ID",
     "@realqulaylikm39",
 )
 
+# Railway Variables bo'limiga oldingi reklama matnini kiriting.
+PREVIOUS_AD_TEXT = os.getenv(
+    "PREVIOUS_AD_TEXT",
+    "",
+).strip()
+
+# Loyihadagi mavjud flyer rasmi.
+FLYER_PATH = os.getenv(
+    "FLYER_PATH",
+    "real_restarant_menyu.png",
+)
 
 # ============================================================
 # TEKSHIRUV
@@ -51,166 +47,79 @@ TELEGRAM_CHAT_ID = os.getenv(
 if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError(
         "TELEGRAM_BOT_TOKEN topilmadi! "
-        "Railway → Variables bo'limiga tokenni kiriting."
+        "Railway Variables bo'limini tekshiring."
     )
 
+if not PREVIOUS_AD_TEXT:
+    raise RuntimeError(
+        "PREVIOUS_AD_TEXT topilmadi! "
+        "Railway Variables bo'limiga oldingi reklama "
+        "matnini kiriting."
+    )
 
 # ============================================================
-# ASOSIY VAZIFA
+# TELEGRAMGA REKLAMA YUBORISH
 # ============================================================
 
 async def send_restaurant_ad():
-    """
-    Railway Cron bir marta ishga tushirganda:
-
-    1. Kategoriya tanlanadi
-    2. AI reklama matnini yaratadi
-    3. AI flyer yaratadi
-    4. Telegramga yuboradi
-    5. Jarayon tugaydi
-
-    Keyingi ishga tushirishni Railway Cron amalga oshiradi.
-    """
-
-    logger.info("=" * 60)
-    logger.info("REAL RESTAURANT AI BOT ISHLADI")
-    logger.info("=" * 60)
-
-    # --------------------------------------------------------
-    # 1. BUGUNGI KATEGORIYA
-    # --------------------------------------------------------
-
-    category = get_current_category()
-
-    category_name = category["name"]
-
-    logger.info(
-        "Bugungi reklama kategoriyasi: %s",
-        category_name,
-    )
-
-    # --------------------------------------------------------
-    # 2. AI REKLAMA MATNI
-    # --------------------------------------------------------
-
-    logger.info(
-        "AI reklama matnini tayyorlamoqda..."
-    )
-
-    ad_text = create_ad_text(category)
-
-    logger.info(
-        "Reklama matni tayyor."
-    )
-
-    # --------------------------------------------------------
-    # 3. AI FLYER
-    # --------------------------------------------------------
-
-    logger.info(
-        "AI flyer tayyorlamoqda..."
-    )
-
-    flyer_path = None
+    logger.info("=" * 55)
+    logger.info("REAL RESTAURANT BOT ISHLADI — AI O'CHIRILGAN")
+    logger.info("Oldingi reklama matni ishlatiladi")
+    logger.info("=" * 55)
 
     try:
+        async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
 
-        flyer_path = create_flyer(category)
+            flyer = Path(FLYER_PATH)
 
-        logger.info(
-            "Flyer tayyor: %s",
-            flyer_path,
-        )
-
-        # ----------------------------------------------------
-        # 4. TELEGRAM
-        # ----------------------------------------------------
-
-        logger.info(
-            "Telegramga yuborilmoqda..."
-        )
-
-        async with Bot(
-            token=TELEGRAM_BOT_TOKEN
-        ) as bot:
-
-            # Telegram caption maksimal uzunligi sababli
-            # juda uzun matn bo'lsa qisqartiramiz.
-            caption = ad_text[:1000]
-
-            await bot.send_photo(
-                chat_id=TELEGRAM_CHAT_ID,
-                photo=open(
-                    flyer_path,
-                    "rb",
-                ),
-                caption=caption,
-            )
-
-        logger.info(
-            "✅ Flyer va reklama Telegramga yuborildi!"
-        )
-
-    except TelegramError as error:
-
-        logger.error(
-            "❌ Telegram xatosi: %s",
-            error,
-        )
-
-        raise
-
-    except Exception as error:
-
-        logger.exception(
-            "❌ Reklama yuborishda xato: %s",
-            error,
-        )
-
-        raise
-
-    finally:
-
-        # ----------------------------------------------------
-        # VAQTINCHALIK FAYLNI O'CHIRISH
-        # ----------------------------------------------------
-
-        if flyer_path:
-
-            try:
-
-                if os.path.exists(flyer_path):
-                    os.remove(flyer_path)
-
-                    logger.info(
-                        "Vaqtinchalik flyer fayli o'chirildi."
+            if flyer.is_file():
+                # Mavjud flyer va oldingi matn yuboriladi.
+                with flyer.open("rb") as photo:
+                    await bot.send_photo(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        photo=photo,
+                        caption=PREVIOUS_AD_TEXT[:1024],
                     )
 
-            except Exception as error:
+                # Matn 1024 belgidan uzun bo'lsa,
+                # qolgan qismi alohida xabar bo'lib ketadi.
+                if len(PREVIOUS_AD_TEXT) > 1024:
+                    await bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=PREVIOUS_AD_TEXT[1024:],
+                    )
 
-                logger.warning(
-                    "Flyer faylini o'chirib bo'lmadi: %s",
-                    error,
+                logger.info("Reklama va flyer yuborildi.")
+
+            else:
+                # Flyer topilmasa, matnning o'zi yuboriladi.
+                await bot.send_message(
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=PREVIOUS_AD_TEXT,
                 )
 
-    logger.info("=" * 60)
-    logger.info(
-        "REAL RESTAURANT AI BOT ISHI YAKUNLANDI"
-    )
-    logger.info("=" * 60)
+                logger.warning(
+                    "Flyer topilmadi: %s. "
+                    "Faqat reklama matni yuborildi.",
+                    flyer,
+                )
 
+        logger.info("REKLAMA MUVAFFAQIYATLI YUBORILDI")
 
-# ============================================================
-# START
-# ============================================================
+    except TelegramError:
+        logger.exception("Telegram xatosi yuz berdi.")
+        raise
+
+    except Exception:
+        logger.exception("Reklama yuborishda xato yuz berdi.")
+        raise
+
+    logger.info("BOT ISHI YAKUNLANDI")
+
 
 def main():
-
-    asyncio.run(
-        send_restaurant_ad()
-    )
+    asyncio.run(send_restaurant_ad())
 
 
 if __name__ == "__main__":
-
     main()
